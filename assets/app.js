@@ -50,6 +50,7 @@ const els = {
   imagePreview: document.querySelector("#imagePreview"),
   ocrStatus: document.querySelector("#ocrStatus"),
   ocrProgress: document.querySelector("#ocrProgress"),
+  ocrRawText: document.querySelector("#ocrRawText"),
   planText: document.querySelector("#planText"),
   loadSample: document.querySelector("#loadSample"),
   heroSample: document.querySelector("#heroSample"),
@@ -161,12 +162,14 @@ async function recognizeImage(file) {
 
   try {
     const imageForOcr = await prepareImageForOcr(file);
-    let text = await recognizeImageText(imageForOcr, "6", "正在按表格模式识别图片文字");
-    if (countCourseCodes(text) < 2) {
+    let result = await recognizeImageText(imageForOcr, "6", "正在按表格模式识别图片文字");
+    if (countCourseCodes(result.combinedText) < 2) {
       setOcrProgress("正在换一种版面模式重新识别", 45);
-      text = await recognizeImageText(file, "11", "正在按稀疏文字模式识别图片文字");
+      result = await recognizeImageText(imageForOcr, "11", "正在按稀疏文字模式识别图片文字");
     }
+    const text = result.combinedText;
     els.planText.value = text;
+    els.ocrRawText.value = buildOcrDebugText(result);
     setOcrProgress("图片文字识别完成", 100);
     els.fileHint.textContent = text
       ? `已识别：${file.name}，请检查文本后可继续编辑。`
@@ -192,11 +195,18 @@ async function recognizeImageText(image, pageSegMode, statusText) {
       }
     }
   });
-  return cleanOcrText(result.data.text);
+  const rawText = cleanOcrText(result.data.text);
+  const tableText = reconstructOcrTableText(result.data.words || []);
+  return {
+    rawText,
+    tableText,
+    combinedText: mergeOcrTexts(tableText, rawText)
+  };
 }
 
 function countCourseCodes(text) {
-  return (text.match(new RegExp(courseCodePattern.source, "gi")) || []).length;
+  const normalized = normalizeOcrCourseCodes(text);
+  return (normalized.match(new RegExp(courseCodePattern.source, "gi")) || []).length;
 }
 
 function showImagePreview(file) {
@@ -213,6 +223,7 @@ function clearImagePreview() {
   state.imagePreviewUrl = "";
   els.imagePreview.removeAttribute("src");
   els.ocrBox.hidden = true;
+  els.ocrRawText.value = "";
   setOcrProgress("准备识别图片", 0);
 }
 
@@ -232,13 +243,115 @@ function formatOcrStatus(status) {
 }
 
 function cleanOcrText(text) {
-  return text
+  return normalizeOcrCourseCodes(text)
     .replace(/\r/g, "")
     .replace(/[|｜]/g, " ")
     .replace(/[。·•]/g, ".")
+    .replace(/[ⅠⅡⅢⅣⅤⅥⅦⅧⅨⅩ]/g, (char) => romanNumeralMap[char] || char)
     .replace(/[ \t]+/g, " ")
     .replace(/\n{3,}/g, "\n\n")
     .trim();
+}
+
+const romanNumeralMap = {
+  "Ⅰ": "I",
+  "Ⅱ": "II",
+  "Ⅲ": "III",
+  "Ⅳ": "IV",
+  "Ⅴ": "V",
+  "Ⅵ": "VI",
+  "Ⅶ": "VII",
+  "Ⅷ": "VIII",
+  "Ⅸ": "IX",
+  "Ⅹ": "X"
+};
+
+function normalizeOcrCourseCodes(text) {
+  return String(text || "")
+    .replace(/([A-Z]{2,})\s*[.,，。]\s*([A-Z])\s*(\d{3,})/gi, "$1.$2$3")
+    .replace(/([A-Z]{2,})\s+([A-Z])\s*(\d{3,})/g, "$1.$2$3")
+    .replace(/([A-Z]{3,})\s+(\d{3,})/g, "$1$2");
+}
+
+function reconstructOcrTableText(words) {
+  const cleanWords = words
+    .map(normalizeOcrWord)
+    .filter((word) => word.text && word.confidence > 18 && word.width > 2 && word.height > 2)
+    .sort((a, b) => a.centerY - b.centerY || a.left - b.left);
+
+  if (!cleanWords.length) return "";
+
+  const medianHeight = median(cleanWords.map((word) => word.height)) || 16;
+  const rowTolerance = Math.max(10, medianHeight * 0.78);
+  const rows = [];
+
+  cleanWords.forEach((word) => {
+    const row = rows.find((item) => Math.abs(item.centerY - word.centerY) <= rowTolerance);
+    if (!row) {
+      rows.push({ centerY: word.centerY, words: [word] });
+      return;
+    }
+    row.words.push(word);
+    row.centerY = row.words.reduce((sum, item) => sum + item.centerY, 0) / row.words.length;
+  });
+
+  return rows
+    .sort((a, b) => a.centerY - b.centerY)
+    .map((row) => row.words.sort((a, b) => a.left - b.left).map((word) => word.text).join(" "))
+    .map(normalizeOcrCourseCodes)
+    .join("\n");
+}
+
+function normalizeOcrWord(word) {
+  const bbox = word.bbox || {};
+  const left = Number(bbox.x0 || 0);
+  const top = Number(bbox.y0 || 0);
+  const right = Number(bbox.x1 || left);
+  const bottom = Number(bbox.y1 || top);
+  return {
+    text: cleanOcrToken(word.text || ""),
+    confidence: Number(word.confidence || 0),
+    left,
+    top,
+    right,
+    bottom,
+    width: Math.max(0, right - left),
+    height: Math.max(0, bottom - top),
+    centerY: top + Math.max(0, bottom - top) / 2
+  };
+}
+
+function cleanOcrToken(token) {
+  return String(token)
+    .replace(/[|｜]/g, "")
+    .replace(/[。·•]/g, ".")
+    .replace(/[ⅠⅡⅢⅣⅤⅥⅦⅧⅨⅩ]/g, (char) => romanNumeralMap[char] || char)
+    .trim();
+}
+
+function median(values) {
+  const sorted = values.filter(Number.isFinite).sort((a, b) => a - b);
+  if (!sorted.length) return 0;
+  const mid = Math.floor(sorted.length / 2);
+  return sorted.length % 2 ? sorted[mid] : (sorted[mid - 1] + sorted[mid]) / 2;
+}
+
+function mergeOcrTexts(tableText, rawText) {
+  return [tableText, rawText]
+    .filter(Boolean)
+    .join("\n\n")
+    .replace(/\n{3,}/g, "\n\n")
+    .trim();
+}
+
+function buildOcrDebugText(result) {
+  return [
+    "【表格重组】",
+    result.tableText || "没有重组出表格行",
+    "",
+    "【OCR 原文】",
+    result.rawText || "没有识别到文字"
+  ].join("\n");
 }
 
 async function prepareImageForOcr(file) {
@@ -295,6 +408,7 @@ function analyze() {
 }
 
 function parseInput(raw) {
+  const normalizedRaw = cleanOcrText(raw);
   const jsonCourses = parseJson(raw);
   if (jsonCourses.length) {
     return {
@@ -311,7 +425,7 @@ function parseInput(raw) {
     };
   }
 
-  const lines = raw
+  const lines = normalizedRaw
     .split(/\n+/)
     .map((line) => line.trim())
     .filter(Boolean);
@@ -521,7 +635,7 @@ function splitTableCourseColumns(text) {
 }
 
 function normalizeTableLine(line) {
-  return line
+  return normalizeOcrCourseCodes(line)
     .replace(/[|｜]/g, " ")
     .replace(/[。·•]/g, ".")
     .replace(/([A-Z]{2,})\s*[.,，。]\s*([A-Z]\d{3,})/gi, "$1.$2")

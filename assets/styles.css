@@ -437,6 +437,24 @@ button:disabled {
   background: var(--primary);
 }
 
+.ocr-raw {
+  color: var(--muted);
+  font-size: 13px;
+}
+
+.ocr-raw summary {
+  cursor: pointer;
+  font-weight: 700;
+}
+
+.ocr-raw textarea {
+  min-height: 150px;
+  margin-top: 10px;
+  font-family:
+    "SFMono-Regular", Consolas, "Liberation Mono", Menlo, monospace;
+  font-size: 12px;
+}
+
 .upload-icon {
   display: grid;
   width: 36px;
