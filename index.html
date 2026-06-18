@@ -1,0 +1,247 @@
+<!doctype html>
+<html lang="zh-CN">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <title>专业培养方案可视化</title>
+    <link rel="stylesheet" href="assets/styles.css" />
+  </head>
+  <body>
+    <header class="site-header">
+      <a class="logo" href="#top" aria-label="培养方案可视化首页">
+        <span class="brand-mark">培</span>
+        <span>培养方案可视化</span>
+      </a>
+      <nav class="site-nav" aria-label="网站导航">
+        <a href="#workspace">上传识别</a>
+        <a href="#features">功能</a>
+        <a href="#examples">示例</a>
+        <a href="#about">说明</a>
+      </nav>
+      <a class="nav-cta" href="#workspace">开始使用</a>
+    </header>
+
+    <main id="top">
+      <section class="hero">
+        <div class="hero-copy">
+          <p class="eyebrow">面向高校专业培养方案</p>
+          <h1>上传培养方案，自动生成可读、可查、可展示的课程地图</h1>
+          <p>
+            将分散在文档里的课程、学分、学期和类别抽取出来，形成总览指标、学分结构、学期路线图与课程清单。
+          </p>
+          <div class="hero-actions">
+            <a class="primary link-button" href="#workspace">上传方案</a>
+            <button type="button" class="ghost" id="heroSample">查看示例</button>
+          </div>
+        </div>
+
+        <div class="hero-preview" aria-label="培养方案可视化预览">
+          <div class="preview-top">
+            <span>计算机科学与技术</span>
+            <strong>142 学分</strong>
+          </div>
+          <div class="preview-bars">
+            <span style="--bar: 82%">公共基础</span>
+            <span style="--bar: 72%">专业核心</span>
+            <span style="--bar: 48%">实践教学</span>
+          </div>
+          <div class="preview-grid">
+            <span>第1学期</span>
+            <span>第2学期</span>
+            <span>第3学期</span>
+            <span>第4学期</span>
+            <span>第5学期</span>
+            <span>第6学期</span>
+            <span>第7学期</span>
+            <span>第8学期</span>
+          </div>
+        </div>
+      </section>
+
+      <section class="section intro-strip" aria-label="网站能力概览">
+        <article>
+          <strong>本地识别</strong>
+          <span>文本在浏览器内处理，适合快速试用和演示。</span>
+        </article>
+        <article>
+          <strong>结构化输出</strong>
+          <span>课程、学分、学期、类别会整理成表格和 JSON。</span>
+        </article>
+        <article>
+          <strong>即时可视化</strong>
+          <span>自动生成学分结构和学期负荷图。</span>
+        </article>
+      </section>
+
+      <section class="section workspace" id="workspace">
+        <aside class="input-panel" aria-label="培养方案上传与识别">
+          <div>
+            <p class="eyebrow">上传识别</p>
+            <h2>把培养方案放进来</h2>
+            <p class="panel-lead">支持上传文本类文件，也可以直接粘贴从 Word、PDF 中复制出来的正文。</p>
+          </div>
+
+          <label class="dropzone" for="planFile" id="dropzone">
+            <input id="planFile" type="file" accept=".txt,.csv,.json,.md" />
+            <span class="upload-icon">+</span>
+            <strong>上传培养方案文件</strong>
+            <small>支持 TXT、CSV、Markdown、JSON 文本类文件</small>
+          </label>
+
+          <div class="toolbar">
+            <button type="button" id="loadSample">载入示例</button>
+            <button type="button" id="clearAll" class="ghost">清空</button>
+          </div>
+
+          <label class="text-input">
+            <span>培养方案文本</span>
+            <textarea
+              id="planText"
+              placeholder="可粘贴课程表，例如：&#10;高等数学A 4 学分 第1学期 公共基础课&#10;数据结构 3 学分 第3学期 专业核心课"
+            ></textarea>
+          </label>
+
+          <button type="button" class="primary" id="analyzeBtn">识别并可视化</button>
+          <p class="hint" id="fileHint">识别在本地浏览器完成，文件内容不会上传到外部服务。</p>
+        </aside>
+
+        <section class="dashboard" aria-label="培养方案可视化结果">
+          <header class="dashboard-header">
+            <div>
+              <p class="eyebrow">识别结果</p>
+              <h2 id="programTitle">等待上传培养方案</h2>
+            </div>
+            <button type="button" id="exportJson" class="ghost" disabled>导出 JSON</button>
+          </header>
+
+          <section class="stats-grid" aria-label="核心指标">
+            <article class="stat-card">
+              <span>课程数量</span>
+              <strong id="courseCount">0</strong>
+            </article>
+            <article class="stat-card">
+              <span>总学分</span>
+              <strong id="creditTotal">0</strong>
+            </article>
+            <article class="stat-card">
+              <span>学期覆盖</span>
+              <strong id="semesterCount">0</strong>
+            </article>
+            <article class="stat-card">
+              <span>识别完整度</span>
+              <strong id="confidenceScore">0%</strong>
+            </article>
+          </section>
+
+          <section class="visual-grid">
+            <article class="panel">
+              <div class="panel-title">
+                <h3>学分结构</h3>
+                <span id="categoryLabel">暂无数据</span>
+              </div>
+              <div class="donut-wrap">
+                <svg id="creditDonut" viewBox="0 0 160 160" role="img" aria-label="学分结构环图"></svg>
+                <ul id="categoryLegend" class="legend"></ul>
+              </div>
+            </article>
+
+            <article class="panel">
+              <div class="panel-title">
+                <h3>学期路线图</h3>
+                <span id="semesterLabel">暂无数据</span>
+              </div>
+              <div id="semesterTimeline" class="timeline empty-state">
+                上传培养方案后，这里会展示每学期课程和学分负荷。
+              </div>
+            </article>
+          </section>
+
+          <section class="panel">
+            <div class="panel-title">
+              <h3>课程清单</h3>
+              <div class="filters" role="group" aria-label="课程筛选">
+                <input id="searchCourse" type="search" placeholder="搜索课程" />
+                <select id="categoryFilter">
+                  <option value="all">全部类别</option>
+                </select>
+              </div>
+            </div>
+            <div class="table-wrap">
+              <table>
+                <thead>
+                  <tr>
+                    <th>课程名称</th>
+                    <th>学分</th>
+                    <th>学期</th>
+                    <th>类别</th>
+                    <th>备注</th>
+                  </tr>
+                </thead>
+                <tbody id="courseTable">
+                  <tr>
+                    <td colspan="5" class="empty-cell">还没有识别到课程。</td>
+                  </tr>
+                </tbody>
+              </table>
+            </div>
+          </section>
+        </section>
+      </section>
+
+      <section class="section feature-section" id="features">
+        <div class="section-heading">
+          <p class="eyebrow">功能</p>
+          <h2>从文档到课程地图，一步完成</h2>
+        </div>
+        <div class="feature-grid">
+          <article>
+            <h3>培养方案识别</h3>
+            <p>从常见中文课程表写法中提取课程名称、学分、学期、课程类别，并标记缺失信息。</p>
+          </article>
+          <article>
+            <h3>学分结构分析</h3>
+            <p>按公共基础、专业基础、专业核心、实践教学等类别汇总学分，快速判断结构比例。</p>
+          </article>
+          <article>
+            <h3>学期负荷展示</h3>
+            <p>按学期聚合课程和学分，帮助查看课程安排是否集中、是否需要调整节奏。</p>
+          </article>
+          <article>
+            <h3>结果导出</h3>
+            <p>识别后的结构化数据可以导出为 JSON，方便接入后续系统或继续加工。</p>
+          </article>
+        </div>
+      </section>
+
+      <section class="section examples" id="examples">
+        <div class="example-copy">
+          <p class="eyebrow">示例格式</p>
+          <h2>按课程表粘贴即可识别</h2>
+          <p>你可以从培养方案中复制课程表正文，也可以上传整理好的 CSV 或 JSON 文件。</p>
+        </div>
+        <pre class="example-card"><code>课程名称 学分 学期 课程类别
+高等数学A 5 第1学期 公共基础课
+程序设计基础 4 第1学期 专业基础课
+数据结构 4 第2学期 专业核心课
+毕业设计 8 第8学期 毕业设计</code></pre>
+      </section>
+
+      <section class="section about" id="about">
+        <div>
+          <p class="eyebrow">说明</p>
+          <h2>当前版本适合快速演示与需求验证</h2>
+        </div>
+        <p>
+          这个网站目前是纯前端版本，适合展示上传、识别和可视化流程。后续可以继续扩展 Word/PDF 解析、扫描件 OCR、课程先修关系图、毕业要求矩阵和后台账号管理。
+        </p>
+      </section>
+    </main>
+
+    <footer class="site-footer">
+      <span>培养方案可视化</span>
+      <a href="#workspace">回到上传识别</a>
+    </footer>
+
+    <script src="assets/app.js"></script>
+  </body>
+</html>

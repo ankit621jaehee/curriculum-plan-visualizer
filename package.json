@@ -1,0 +1,16 @@
+{
+  "name": "curriculum-plan-visualizer",
+  "version": "1.0.0",
+  "private": true,
+  "description": "专业培养方案识别与可视化静态网站",
+  "scripts": {
+    "start": "python3 -m http.server 5173",
+    "check": "node --check assets/app.js"
+  },
+  "keywords": [
+    "curriculum",
+    "visualization",
+    "static-site"
+  ],
+  "license": "UNLICENSED"
+}
