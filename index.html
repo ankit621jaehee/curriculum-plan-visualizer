@@ -5,6 +5,7 @@
     <meta name="viewport" content="width=device-width, initial-scale=1.0" />
     <title>专业培养方案可视化</title>
     <link rel="stylesheet" href="assets/styles.css" />
+    <script src="https://cdn.jsdelivr.net/npm/tesseract.js@5/dist/tesseract.min.js" defer></script>
   </head>
   <body>
     <header class="site-header">
@@ -61,7 +62,7 @@
       <section class="section intro-strip" aria-label="网站能力概览">
         <article>
           <strong>本地识别</strong>
-          <span>文本在浏览器内处理，适合快速试用和演示。</span>
+          <span>文本和图片在浏览器内处理，适合快速试用和演示。</span>
         </article>
         <article>
           <strong>结构化输出</strong>
@@ -78,15 +79,25 @@
           <div>
             <p class="eyebrow">上传识别</p>
             <h2>把培养方案放进来</h2>
-            <p class="panel-lead">支持上传文本类文件，也可以直接粘贴从 Word、PDF 中复制出来的正文。</p>
+            <p class="panel-lead">支持上传文本类文件和课程表截图，也可以直接粘贴从 Word、PDF 中复制出来的正文。</p>
           </div>
 
           <label class="dropzone" for="planFile" id="dropzone">
-            <input id="planFile" type="file" accept=".txt,.csv,.json,.md" />
+            <input id="planFile" type="file" accept=".txt,.csv,.json,.md,.png,.jpg,.jpeg,.webp,.bmp" />
             <span class="upload-icon">+</span>
             <strong>上传培养方案文件</strong>
-            <small>支持 TXT、CSV、Markdown、JSON 文本类文件</small>
+            <small>支持 TXT、CSV、Markdown、JSON、PNG、JPG、WebP</small>
           </label>
+
+          <div class="ocr-box" id="ocrBox" hidden>
+            <div class="ocr-preview">
+              <img id="imagePreview" alt="待识别的培养方案图片预览" />
+            </div>
+            <div class="ocr-status">
+              <span id="ocrStatus">准备识别图片</span>
+              <progress id="ocrProgress" max="100" value="0"></progress>
+            </div>
+          </div>
 
           <div class="toolbar">
             <button type="button" id="loadSample">载入示例</button>
@@ -196,7 +207,7 @@
         <div class="feature-grid">
           <article>
             <h3>培养方案识别</h3>
-            <p>从常见中文课程表写法中提取课程名称、学分、学期、课程类别，并标记缺失信息。</p>
+            <p>从文本或课程表截图中提取课程名称、学分、学期、课程类别，并标记缺失信息。</p>
           </article>
           <article>
             <h3>学分结构分析</h3>
@@ -217,7 +228,7 @@
         <div class="example-copy">
           <p class="eyebrow">示例格式</p>
           <h2>按课程表粘贴即可识别</h2>
-          <p>你可以从培养方案中复制课程表正文，也可以上传整理好的 CSV 或 JSON 文件。</p>
+          <p>你可以从培养方案中复制课程表正文，也可以上传整理好的 CSV、JSON 文件或清晰截图。</p>
         </div>
         <pre class="example-card"><code>课程名称 学分 学期 课程类别
 高等数学A 5 第1学期 公共基础课
@@ -232,7 +243,7 @@
           <h2>当前版本适合快速演示与需求验证</h2>
         </div>
         <p>
-          这个网站目前是纯前端版本，适合展示上传、识别和可视化流程。后续可以继续扩展 Word/PDF 解析、扫描件 OCR、课程先修关系图、毕业要求矩阵和后台账号管理。
+          这个网站目前是纯前端版本，适合展示上传、图片识别和可视化流程。后续可以继续扩展 Word/PDF 解析、批量扫描件处理、课程先修关系图、毕业要求矩阵和后台账号管理。
         </p>
       </section>
     </main>

@@ -38,12 +38,17 @@ const sampleText = `计算机科学与技术专业本科培养方案
 const state = {
   courses: [],
   programName: "",
-  confidence: 0
+  confidence: 0,
+  imagePreviewUrl: ""
 };
 
 const els = {
   planFile: document.querySelector("#planFile"),
   dropzone: document.querySelector("#dropzone"),
+  ocrBox: document.querySelector("#ocrBox"),
+  imagePreview: document.querySelector("#imagePreview"),
+  ocrStatus: document.querySelector("#ocrStatus"),
+  ocrProgress: document.querySelector("#ocrProgress"),
   planText: document.querySelector("#planText"),
   loadSample: document.querySelector("#loadSample"),
   heroSample: document.querySelector("#heroSample"),
@@ -81,6 +86,7 @@ els.clearAll.addEventListener("click", () => {
   state.courses = [];
   state.programName = "";
   state.confidence = 0;
+  clearImagePreview();
   els.fileHint.textContent = "识别在本地浏览器完成，文件内容不会上传到外部服务。";
   render();
 });
@@ -118,10 +124,17 @@ els.dropzone.addEventListener("drop", (event) => {
   }
 });
 
-function readFile(file) {
+async function readFile(file) {
   const ext = file.name.split(".").pop().toLowerCase();
+  if (["png", "jpg", "jpeg", "webp", "bmp"].includes(ext) || file.type.startsWith("image/")) {
+    await recognizeImage(file);
+    return;
+  }
+
+  clearImagePreview();
+
   if (!["txt", "csv", "json", "md"].includes(ext)) {
-    els.fileHint.textContent = "当前网站支持文本类文件。PDF 或 Word 可先复制正文粘贴到文本框。";
+    els.fileHint.textContent = "当前网站支持文本和图片文件。PDF 或 Word 可先复制正文粘贴到文本框。";
     return;
   }
 
@@ -132,6 +145,83 @@ function readFile(file) {
     analyze();
   };
   reader.readAsText(file, "utf-8");
+}
+
+async function recognizeImage(file) {
+  if (!window.Tesseract) {
+    els.fileHint.textContent = "图片识别组件加载失败，请联网后刷新页面再试。";
+    return;
+  }
+
+  showImagePreview(file);
+  setOcrProgress("正在准备图片识别", 0);
+  els.analyzeBtn.disabled = true;
+  els.fileHint.textContent = "正在识别图片文字，图片越清晰识别越准确。";
+
+  try {
+    const result = await window.Tesseract.recognize(file, "chi_sim+eng", {
+      logger: (message) => {
+        if (message.status === "recognizing text") {
+          setOcrProgress("正在识别图片文字", Math.round((message.progress || 0) * 100));
+        } else if (message.status) {
+          setOcrProgress(formatOcrStatus(message.status), Math.round((message.progress || 0) * 100));
+        }
+      }
+    });
+    const text = cleanOcrText(result.data.text);
+    els.planText.value = text;
+    setOcrProgress("图片文字识别完成", 100);
+    els.fileHint.textContent = text
+      ? `已识别：${file.name}，请检查文本后可继续编辑。`
+      : "没有从图片中识别到有效文字，请换一张更清晰的截图。";
+    analyze();
+  } catch (error) {
+    setOcrProgress("图片识别失败", 0);
+    els.fileHint.textContent = "图片识别失败，请确认图片清晰，或先手动复制文字到文本框。";
+  } finally {
+    els.analyzeBtn.disabled = false;
+  }
+}
+
+function showImagePreview(file) {
+  clearImagePreview();
+  state.imagePreviewUrl = URL.createObjectURL(file);
+  els.imagePreview.src = state.imagePreviewUrl;
+  els.ocrBox.hidden = false;
+}
+
+function clearImagePreview() {
+  if (state.imagePreviewUrl) {
+    URL.revokeObjectURL(state.imagePreviewUrl);
+  }
+  state.imagePreviewUrl = "";
+  els.imagePreview.removeAttribute("src");
+  els.ocrBox.hidden = true;
+  setOcrProgress("准备识别图片", 0);
+}
+
+function setOcrProgress(status, value) {
+  els.ocrStatus.textContent = status;
+  els.ocrProgress.value = value;
+}
+
+function formatOcrStatus(status) {
+  const statusMap = {
+    "loading tesseract core": "正在加载识别核心",
+    "initializing tesseract": "正在初始化识别引擎",
+    "loading language traineddata": "正在加载中文识别模型",
+    "initializing api": "正在准备识别接口"
+  };
+  return statusMap[status] || "正在处理图片";
+}
+
+function cleanOcrText(text) {
+  return text
+    .replace(/\r/g, "")
+    .replace(/[|｜]/g, " ")
+    .replace(/[ \t]+/g, " ")
+    .replace(/\n{3,}/g, "\n\n")
+    .trim();
 }
 
 function loadSamplePlan() {
