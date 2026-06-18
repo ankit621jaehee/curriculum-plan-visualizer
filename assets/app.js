@@ -12,6 +12,7 @@ const categoryKeywords = [
   "必修课",
   "选修课"
 ];
+const courseCodePattern = /\b[A-Z]{2,}[A-Z0-9]*(?:[.\-][A-Z0-9]+)*\d{3,}\b/i;
 
 const sampleText = `计算机科学与技术专业本科培养方案
 培养目标：培养具备计算思维、工程实践能力和系统设计能力的高素质应用型人才。
@@ -159,16 +160,12 @@ async function recognizeImage(file) {
   els.fileHint.textContent = "正在识别图片文字，图片越清晰识别越准确。";
 
   try {
-    const result = await window.Tesseract.recognize(file, "chi_sim+eng", {
-      logger: (message) => {
-        if (message.status === "recognizing text") {
-          setOcrProgress("正在识别图片文字", Math.round((message.progress || 0) * 100));
-        } else if (message.status) {
-          setOcrProgress(formatOcrStatus(message.status), Math.round((message.progress || 0) * 100));
-        }
-      }
-    });
-    const text = cleanOcrText(result.data.text);
+    const imageForOcr = await prepareImageForOcr(file);
+    let text = await recognizeImageText(imageForOcr, "6", "正在按表格模式识别图片文字");
+    if (countCourseCodes(text) < 2) {
+      setOcrProgress("正在换一种版面模式重新识别", 45);
+      text = await recognizeImageText(file, "11", "正在按稀疏文字模式识别图片文字");
+    }
     els.planText.value = text;
     setOcrProgress("图片文字识别完成", 100);
     els.fileHint.textContent = text
@@ -181,6 +178,25 @@ async function recognizeImage(file) {
   } finally {
     els.analyzeBtn.disabled = false;
   }
+}
+
+async function recognizeImageText(image, pageSegMode, statusText) {
+  const result = await window.Tesseract.recognize(image, "chi_sim+eng", {
+    preserve_interword_spaces: "1",
+    tessedit_pageseg_mode: pageSegMode,
+    logger: (message) => {
+      if (message.status === "recognizing text") {
+        setOcrProgress(statusText, Math.round((message.progress || 0) * 100));
+      } else if (message.status) {
+        setOcrProgress(formatOcrStatus(message.status), Math.round((message.progress || 0) * 100));
+      }
+    }
+  });
+  return cleanOcrText(result.data.text);
+}
+
+function countCourseCodes(text) {
+  return (text.match(new RegExp(courseCodePattern.source, "gi")) || []).length;
 }
 
 function showImagePreview(file) {
@@ -219,9 +235,41 @@ function cleanOcrText(text) {
   return text
     .replace(/\r/g, "")
     .replace(/[|｜]/g, " ")
+    .replace(/[。·•]/g, ".")
     .replace(/[ \t]+/g, " ")
     .replace(/\n{3,}/g, "\n\n")
     .trim();
+}
+
+async function prepareImageForOcr(file) {
+  const bitmap = await createImageBitmap(file);
+  const scale = Math.min(2.4, Math.max(1.2, 2200 / Math.max(bitmap.width, bitmap.height)));
+  const canvas = document.createElement("canvas");
+  canvas.width = Math.round(bitmap.width * scale);
+  canvas.height = Math.round(bitmap.height * scale);
+
+  const ctx = canvas.getContext("2d", { willReadFrequently: true });
+  ctx.fillStyle = "#fff";
+  ctx.fillRect(0, 0, canvas.width, canvas.height);
+  ctx.imageSmoothingEnabled = true;
+  ctx.imageSmoothingQuality = "high";
+  ctx.drawImage(bitmap, 0, 0, canvas.width, canvas.height);
+
+  const imageData = ctx.getImageData(0, 0, canvas.width, canvas.height);
+  const data = imageData.data;
+  for (let i = 0; i < data.length; i += 4) {
+    const gray = data[i] * 0.299 + data[i + 1] * 0.587 + data[i + 2] * 0.114;
+    const contrasted = gray < 184 ? Math.max(0, gray - 42) : Math.min(255, gray + 28);
+    const value = contrasted < 132 ? 0 : 255;
+    data[i] = value;
+    data[i + 1] = value;
+    data[i + 2] = value;
+  }
+  ctx.putImageData(imageData, 0, 0);
+
+  return new Promise((resolve) => {
+    canvas.toBlob((blob) => resolve(blob || file), "image/png");
+  });
 }
 
 function loadSamplePlan() {
@@ -267,7 +315,9 @@ function parseInput(raw) {
     .split(/\n+/)
     .map((line) => line.trim())
     .filter(Boolean);
-  const courses = lines.map(parseCourseLine).filter(Boolean);
+  const tableCourses = parseTableCourses(lines);
+  const lineCourses = lines.map(parseCourseLine).filter(Boolean);
+  const courses = tableCourses.length ? tableCourses : lineCourses;
 
   return {
     courses: normalizeCourses(courses),
@@ -335,7 +385,7 @@ function parseCourseLine(line) {
 function hasCourseSignal(line) {
   const ignored = /培养目标|毕业要求|课程名称|学分\s*学期|总学分|说明|要求/.test(line);
   if (ignored) return false;
-  return /学分|第?\d+\s*学期|[一二三四五六七八九十]+学期|必修|选修|课程/.test(line);
+  return courseCodePattern.test(line) || /学分|第?\d+\s*学期|[一二三四五六七八九十]+学期|必修|选修|课程/.test(line);
 }
 
 function extractCredit(line) {
@@ -375,6 +425,141 @@ function extractCategory(line) {
   if (/选修/.test(line)) return "选修课";
   if (/必修/.test(line)) return "必修课";
   return "未分类";
+}
+
+function parseTableCourses(lines) {
+  const courses = [];
+  let activeCategory = "未分类";
+  let activeRecord = "";
+  let activeRecordCategory = activeCategory;
+
+  lines.forEach((line) => {
+    const normalized = normalizeTableLine(line);
+    if (!normalized) return;
+
+    const category = detectTableCategory(normalized);
+    if (category) {
+      pushTableRecord(courses, activeRecord, activeRecordCategory);
+      activeRecord = "";
+      activeCategory = category;
+      activeRecordCategory = activeCategory;
+      return;
+    }
+
+    if (courseCodePattern.test(normalized)) {
+      pushTableRecord(courses, activeRecord, activeRecordCategory);
+      activeRecord = normalized;
+      activeRecordCategory = activeCategory;
+      return;
+    }
+
+    if (activeRecord && !isTableSummaryLine(normalized)) {
+      activeRecord = `${activeRecord} ${normalized}`.trim();
+    }
+  });
+
+  pushTableRecord(courses, activeRecord, activeRecordCategory);
+  return courses;
+}
+
+function pushTableRecord(courses, record, category) {
+  const course = parseTableCourseRecord(record, category);
+  if (course) courses.push(course);
+}
+
+function parseTableCourseRecord(record, category) {
+  if (!record || !courseCodePattern.test(record)) return null;
+
+  const normalized = normalizeTableLine(record);
+  const codeMatch = normalized.match(courseCodePattern);
+  if (!codeMatch) return null;
+
+  const code = normalizeCourseCode(codeMatch[0]);
+  const afterCode = normalized.slice(codeMatch.index + codeMatch[0].length).trim();
+  const parsedColumns = splitTableCourseColumns(afterCode);
+  if (!parsedColumns) return null;
+
+  const name = cleanupTableCourseName(parsedColumns.name);
+  if (!name) return null;
+
+  return {
+    code,
+    name,
+    credit: parsedColumns.credit,
+    semester: parsedColumns.semester,
+    semesterText: parsedColumns.semesterText,
+    category: category || "未分类",
+    note: parsedColumns.semesterText.includes(",")
+      ? `开课学期：${parsedColumns.semesterText}`
+      : "表格识别"
+  };
+}
+
+function splitTableCourseColumns(text) {
+  const normalized = text
+    .replace(/([A-Za-z])([IVX]{1,4})(\d)/g, "$1$2 $3")
+    .replace(/\s+/g, " ")
+    .trim();
+  const match = normalized.match(/^(.*?)\s+((?:\d+(?:\.\d+)?(?:\s*[,，]\s*\d+)?\s*){3,6})$/);
+  if (!match) return null;
+
+  const numberTokens = match[2].match(/\d+(?:\.\d+)?(?:\s*[,，]\s*\d+)?/g) || [];
+  if (numberTokens.length < 3) return null;
+
+  const credit = Number(numberTokens[0]);
+  const semesterText = numberTokens[numberTokens.length - 1].replace(/\s+/g, "");
+  const semester = parseSemesterValue(semesterText);
+
+  if (!credit || !semester) return null;
+
+  return {
+    name: match[1],
+    credit,
+    semester,
+    semesterText
+  };
+}
+
+function normalizeTableLine(line) {
+  return line
+    .replace(/[|｜]/g, " ")
+    .replace(/[。·•]/g, ".")
+    .replace(/([A-Z]{2,})\s*[.,，。]\s*([A-Z]\d{3,})/gi, "$1.$2")
+    .replace(/\b([A-Z]{2,})\s+([A-Z]\d{3,})\b/g, "$1.$2")
+    .replace(/\s+/g, " ")
+    .trim();
+}
+
+function normalizeCourseCode(code) {
+  return code.replace(/[，。]/g, ".").toUpperCase();
+}
+
+function cleanupTableCourseName(name) {
+  return name
+    .replace(/^(课程名称|课程代码|学分|总学时|理论学时|实践学时|开课学期)\s*/g, "")
+    .replace(/\s+/g, " ")
+    .trim();
+}
+
+function detectTableCategory(line) {
+  if (/英语课程|外语特色课程/.test(line)) return "外语特色课程";
+  if (/大类基础课程|大类教育课程|大类平台课程/.test(line)) return "大类基础课程";
+  if (/大类选修课程/.test(line)) return "大类选修课程";
+  if (/公共选修课程/.test(line)) return "公共选修课程";
+  if (/专业教育课程/.test(line)) return "专业教育课程";
+  const found = categoryKeywords.find((keyword) => line.includes(keyword));
+  if (found) return found;
+  return "";
+}
+
+function isTableSummaryLine(line) {
+  return /要求学分|要求子模块数|课程模块|课程代码|课程名称|总学时|理论学时|实践学时|开课学期/.test(line);
+}
+
+function parseSemesterValue(value) {
+  if (typeof value === "number") return value;
+  const matched = String(value).match(/\d+/);
+  return matched ? Number(matched[0]) : 0;
 }
 
 function extractCourseName(line, credit, semester, category) {
@@ -417,13 +602,25 @@ function normalizeCourses(courses) {
   return courses
     .map((course, index) => ({
       id: index + 1,
+      code: readField(course, ["code", "课程代码", "代码"]) || "",
       name: readField(course, ["name", "课程名称", "课程", "名称"]) || `课程 ${index + 1}`,
       credit: Number(readField(course, ["credit", "credits", "学分"]) || 0),
-      semester: Number(readField(course, ["semester", "学期", "开课学期"]) || 0),
+      semester: parseSemesterValue(readField(course, ["semester", "学期", "开课学期"]) || 0),
+      semesterText: readField(course, ["semesterText", "开课学期", "学期"]) || "",
       category: readField(course, ["category", "类别", "课程类别", "性质"]) || "未分类",
       note: readField(course, ["note", "备注"]) || ""
     }))
     .filter((course) => course.name && course.name.length > 1);
+}
+
+function dedupeCourses(courses) {
+  const seen = new Set();
+  return courses.filter((course) => {
+    const key = `${course.code || ""}-${course.name || ""}`.replace(/\s+/g, "").toLowerCase();
+    if (seen.has(key)) return false;
+    seen.add(key);
+    return true;
+  });
 }
 
 function readField(item, keys) {
@@ -578,16 +775,17 @@ function renderCourseTable() {
 
   els.courseTable.innerHTML = "";
   if (!courses.length) {
-    els.courseTable.innerHTML = '<tr><td colspan="5" class="empty-cell">还没有识别到课程。</td></tr>';
+    els.courseTable.innerHTML = '<tr><td colspan="6" class="empty-cell">还没有识别到课程。</td></tr>';
     return;
   }
 
   courses.forEach((course) => {
     const row = document.createElement("tr");
     row.innerHTML = `
+      <td>${escapeHtml(course.code || "-")}</td>
       <td>${escapeHtml(course.name)}</td>
       <td>${course.credit ? formatNumber(course.credit) : "-"}</td>
-      <td>${course.semester ? `第${course.semester}学期` : "-"}</td>
+      <td>${course.semester ? `第${course.semesterText || course.semester}学期` : "-"}</td>
       <td><span class="badge">${escapeHtml(course.category || "未分类")}</span></td>
       <td>${escapeHtml(course.note || "已识别")}</td>
     `;
